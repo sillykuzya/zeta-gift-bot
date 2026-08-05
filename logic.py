@@ -73,19 +73,38 @@ async def submit_step1_photo(bot: Bot, user_id: int, username: str | None, file_
         f"Пользователь: {user_mention(user_id, username)}\n"
         f"Требуемый текст:\n«{user['task_text']}»"
     )
-    msg = await bot.send_photo(
-        config.MODERATION_GROUP_ID, file_id, caption=caption,
-        reply_markup=keyboards.moderation_kb(item_id), parse_mode="HTML",
-    )
+    try:
+        msg = await bot.send_photo(
+            config.MODERATION_GROUP_ID, file_id, caption=caption,
+            reply_markup=keyboards.moderation_kb(item_id), parse_mode="HTML",
+        )
+    except Exception:
+        log.exception("Не удалось отправить скриншот модераторам (шаг 1, user %s)", user_id)
+        await db.set_moderation_status(item_id, "error", None)
+        await revert_to_task(bot, user_id, 1, user["task_text"])
+        return
     await db.set_moderation_messages(item_id, [msg.message_id], msg.message_id)
     scheduler.schedule_once(f"mod:{item_id}", config.MODERATION_TIMEOUT, handle_moderation_timeout, bot, item_id)
     await bot.send_message(user_id, "⏳ Скриншот отправлен на проверку модераторам, подожди немного.")
 
 
+async def revert_to_task(bot: Bot, user_id: int, step: int, task_text: str):
+    """Откатывает пользователя обратно к заданию, если отправка модераторам не удалась
+    (например, неверный MODERATION_GROUP_ID) — иначе он навсегда застрянет в 'на проверке'."""
+    timeout = config.STEP1_TIMEOUT if step == 1 else config.STEP2_TIMEOUT
+    await db.set_task(user_id, config.STATUS_STEP1_TASK if step == 1 else config.STATUS_STEP2_TASK, task_text)
+    scheduler.schedule_once(f"task:{user_id}", timeout, handle_task_timeout, bot, user_id, step)
+    await bot.send_message(
+        user_id,
+        "⚠️ Не получилось отправить скриншот на проверку — техническая проблема на нашей стороне. "
+        "Пришли его ещё раз, пожалуйста.",
+    )
+
+
 _album_tasks: dict[int, asyncio.Task] = {}
 
 
-def schedule_album_summary(bot: Bot, user_id: int, delay: float = 1.5):
+def schedule_album_summary(bot: Bot, user_id: int, delay: float = 4.0):
     """Альбом присылает фото несколькими апдейтами подряд — ждём delay сек после
     последнего и, если задание ещё не набрало 10 фото, шлём одно сводное сообщение."""
     old = _album_tasks.get(user_id)
@@ -125,16 +144,22 @@ async def append_step2_photo(bot: Bot, user_id: int, username: str | None, file_
     item_id = await db.create_moderation_item(user_id, 2, user["task_text"], photos)
 
     media = [InputMediaPhoto(media=p) for p in photos]
-    sent = await bot.send_media_group(config.MODERATION_GROUP_ID, media)
     caption = (
         f"🆕 Проверка — шаг 2 ({len(photos)} скриншотов)\n"
         f"Пользователь: {user_mention(user_id, username)}\n"
         f"Требуемый текст:\n«{user['task_text']}»"
     )
-    control = await bot.send_message(
-        config.MODERATION_GROUP_ID, caption,
-        reply_markup=keyboards.moderation_kb(item_id), parse_mode="HTML",
-    )
+    try:
+        sent = await bot.send_media_group(config.MODERATION_GROUP_ID, media)
+        control = await bot.send_message(
+            config.MODERATION_GROUP_ID, caption,
+            reply_markup=keyboards.moderation_kb(item_id), parse_mode="HTML",
+        )
+    except Exception:
+        log.exception("Не удалось отправить скриншоты модераторам (шаг 2, user %s)", user_id)
+        await db.set_moderation_status(item_id, "error", None)
+        await revert_to_task(bot, user_id, 2, user["task_text"])
+        return
     group_ids = [m.message_id for m in sent] + [control.message_id]
     await db.set_moderation_messages(item_id, group_ids, control.message_id)
     scheduler.schedule_once(f"mod:{item_id}", config.MODERATION_TIMEOUT, handle_moderation_timeout, bot, item_id)
