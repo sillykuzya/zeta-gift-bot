@@ -12,6 +12,7 @@ import keyboards
 router = Router(name="user")
 
 _user_locks: dict[int, asyncio.Lock] = {}
+_last_step1_album_warned: dict[int, str] = {}
 
 
 def _lock_for(user_id: int) -> asyncio.Lock:
@@ -84,8 +85,10 @@ async def handle_photo(message: Message):
         if user["status"] == config.STATUS_STEP1_TASK:
             if message.media_group_id:
                 # на шаге 1 нужен ровно один скриншот — альбом целиком отклоняем,
-                # чтобы не засчитать случайный "лишний" кадр как ответ
-                await message.answer("Нужен только один скриншот — пришли, пожалуйста, одно фото 🙏")
+                # предупреждаем один раз на альбом, а не на каждое фото в нём
+                if _last_step1_album_warned.get(user_id) != message.media_group_id:
+                    _last_step1_album_warned[user_id] = message.media_group_id
+                    await message.answer("Нужен только один скриншот — пришли, пожалуйста, одно фото 🙏")
                 return
             await logic.submit_step1_photo(message.bot, user_id, username, file_id)
         elif user["status"] == config.STATUS_STEP2_TASK:
