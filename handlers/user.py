@@ -1,3 +1,5 @@
+import asyncio
+
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery
@@ -8,6 +10,15 @@ import logic
 import keyboards
 
 router = Router(name="user")
+
+_user_locks: dict[int, asyncio.Lock] = {}
+
+
+def _lock_for(user_id: int) -> asyncio.Lock:
+    """Одна блокировка на пользователя — не даёт двум почти одновременным фото
+    (например, если случайно отправить два скрина подряд на шаге 1) обогнать
+    друг друга и оба проскочить проверку статуса до того, как первое обновит БД."""
+    return _user_locks.setdefault(user_id, asyncio.Lock())
 
 
 @router.message(CommandStart(), F.chat.type == "private")
@@ -63,22 +74,31 @@ async def cmd_start(message: Message):
 async def handle_photo(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username
-    user = await db.get_user(user_id)
-    if user is None:
-        return
     file_id = message.photo[-1].file_id
 
-    if user["status"] == config.STATUS_STEP1_TASK:
-        await logic.submit_step1_photo(message.bot, user_id, username, file_id)
-    elif user["status"] == config.STATUS_STEP2_TASK:
-        if message.media_group_id:
-            # часть альбома — считаем молча, сводку пришлём одним сообщением после
-            await logic.append_step2_photo(message.bot, user_id, username, file_id, notify_progress=False)
-            logic.schedule_album_summary(message.bot, user_id)
+    async with _lock_for(user_id):
+        user = await db.get_user(user_id)
+        if user is None:
+            return
+
+        if user["status"] == config.STATUS_STEP1_TASK:
+            if message.media_group_id:
+                # на шаге 1 нужен ровно один скриншот — альбом целиком отклоняем,
+                # чтобы не засчитать случайный "лишний" кадр как ответ
+                await message.answer("Нужен только один скриншот — пришли, пожалуйста, одно фото 🙏")
+                return
+            await logic.submit_step1_photo(message.bot, user_id, username, file_id)
+        elif user["status"] == config.STATUS_STEP2_TASK:
+            if message.media_group_id:
+                # часть альбома — считаем молча, сводку пришлём одним сообщением после
+                await logic.append_step2_photo(message.bot, user_id, username, file_id, notify_progress=False)
+                logic.schedule_album_summary(message.bot, user_id)
+            else:
+                await logic.append_step2_photo(message.bot, user_id, username, file_id)
+        elif user["status"] in (config.STATUS_STEP1_REVIEW, config.STATUS_STEP2_REVIEW):
+            await message.answer("⏳ Скриншот уже отправлен на проверку — жди результата, новые не нужны.")
         else:
-            await logic.append_step2_photo(message.bot, user_id, username, file_id)
-    else:
-        await message.answer("Сейчас скриншот не требуется 🙂")
+            await message.answer("Сейчас скриншот не требуется 🙂")
 
 
 @router.callback_query(F.data == "check_subs")

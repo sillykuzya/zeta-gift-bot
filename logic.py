@@ -211,7 +211,11 @@ async def process_moderation_decision(bot: Bot, item_id: int, approved: bool, mo
         else:
             left = config.MAX_ATTEMPTS - attempts
             await bot.send_message(
-                user_id, f"❌ Задание отклонено. Осталось попыток: {left}. Начнём заново:"
+                user_id,
+                f"❌ Задание отклонено. Осталось попыток: {left}.\n\n"
+                "Убедись, что на скриншоте виден именно тот текст комментария, который был выдан "
+                "(слово в слово), и что это свежий скрин под нужным видео — не старое фото. "
+                "Вот новое задание:",
             )
             if step == 1:
                 await issue_step1_task(bot, user_id)
