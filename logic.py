@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramBadRequest
 import config
 import db
 import keyboards
+import replies
 import scheduler
 
 log = logging.getLogger(__name__)
@@ -23,27 +24,14 @@ def user_mention(user_id: int, username: str | None) -> str:
 async def issue_step1_task(bot: Bot, user_id: int):
     text = await db.random_task_text(1)
     await db.set_task(user_id, config.STATUS_STEP1_TASK, text)
-    await bot.send_message(
-        user_id,
-        "🎬 <b>Шаг 1 из 3</b>\n\n"
-        f"В течение <b>5 минут</b> напиши этот текст в ответ на чужой комментарий "
-        f"под видео в TikTok, с которого ты перешёл:\n\n"
-        f"«<b>{text}</b>»\n\n"
-        "Сделай скриншот своего комментария и пришли его сюда 📸",
-    )
+    await bot.send_message(user_id, replies.step1_task(text))
     scheduler.schedule_once(f"task:{user_id}", config.STEP1_TIMEOUT, handle_task_timeout, bot, user_id, 1)
 
 
 async def issue_step2_task(bot: Bot, user_id: int):
     text = await db.random_task_text(2)
     await db.set_task(user_id, config.STATUS_STEP2_TASK, text)
-    await bot.send_message(
-        user_id,
-        "🎬 <b>Шаг 2 из 3</b>\n\n"
-        f"В течение <b>20 минут</b> напиши этот текст под <b>10 разными видео</b> в TikTok:\n\n"
-        f"«<b>{text}</b>»\n\n"
-        "Присылай скриншоты сюда по одному — как только наберётся 10, я отправлю их на проверку 📸",
-    )
+    await bot.send_message(user_id, replies.step2_task(text))
     scheduler.schedule_once(f"task:{user_id}", config.STEP2_TIMEOUT, handle_task_timeout, bot, user_id, 2)
 
 
@@ -55,9 +43,7 @@ async def issue_sponsors_step(bot: Bot, user_id: int):
         await finish_sponsors_step(bot, user_id, user_id)
         return
     await bot.send_message(
-        user_id,
-        "📢 <b>Шаг 3 из 3</b>\n\nПодпишись на все каналы ниже, затем нажми «Проверить подписки»:",
-        reply_markup=keyboards.sponsors_kb(sponsors),
+        user_id, replies.STEP3_SPONSORS, reply_markup=keyboards.sponsors_kb(sponsors),
     )
 
 
@@ -68,11 +54,7 @@ async def submit_step1_photo(bot: Bot, user_id: int, username: str | None, file_
     scheduler.cancel_job(f"task:{user_id}")
     await db.set_status(user_id, config.STATUS_STEP1_REVIEW)
     item_id = await db.create_moderation_item(user_id, 1, user["task_text"], [file_id])
-    caption = (
-        f"🆕 Проверка — шаг 1\n"
-        f"Пользователь: {user_mention(user_id, username)}\n"
-        f"Требуемый текст:\n«{user['task_text']}»"
-    )
+    caption = replies.moderation_caption_step1(user_mention(user_id, username), user["task_text"])
     try:
         msg = await bot.send_photo(
             config.MODERATION_GROUP_ID, file_id, caption=caption,
@@ -85,7 +67,7 @@ async def submit_step1_photo(bot: Bot, user_id: int, username: str | None, file_
         return
     await db.set_moderation_messages(item_id, [msg.message_id], msg.message_id)
     scheduler.schedule_once(f"mod:{item_id}", config.MODERATION_TIMEOUT, handle_moderation_timeout, bot, item_id)
-    await bot.send_message(user_id, "⏳ Скриншот отправлен на проверку модераторам, подожди немного.")
+    await bot.send_message(user_id, replies.SCREENSHOT_SENT_STEP1)
 
 
 async def revert_to_task(bot: Bot, user_id: int, step: int, task_text: str):
@@ -94,11 +76,7 @@ async def revert_to_task(bot: Bot, user_id: int, step: int, task_text: str):
     timeout = config.STEP1_TIMEOUT if step == 1 else config.STEP2_TIMEOUT
     await db.set_task(user_id, config.STATUS_STEP1_TASK if step == 1 else config.STATUS_STEP2_TASK, task_text)
     scheduler.schedule_once(f"task:{user_id}", timeout, handle_task_timeout, bot, user_id, step)
-    await bot.send_message(
-        user_id,
-        "⚠️ Не получилось отправить скриншот на проверку — техническая проблема на нашей стороне. "
-        "Пришли его ещё раз, пожалуйста.",
-    )
+    await bot.send_message(user_id, replies.MODERATION_FORWARD_FAILED)
 
 
 _album_tasks: dict[int, asyncio.Task] = {}
@@ -122,7 +100,7 @@ async def _album_summary_worker(bot: Bot, user_id: int, delay: float):
     user = await db.get_user(user_id)
     if user and user["status"] == config.STATUS_STEP2_TASK:
         count = len(await db.get_task_photos(user_id))
-        await bot.send_message(user_id, f"📸 Альбом получен: {count}/{config.STEP2_REQUIRED_SCREENSHOTS}")
+        await bot.send_message(user_id, replies.step2_album_summary(count, config.STEP2_REQUIRED_SCREENSHOTS))
 
 
 async def append_step2_photo(bot: Bot, user_id: int, username: str | None, file_id: str, notify_progress: bool = True):
@@ -133,7 +111,7 @@ async def append_step2_photo(bot: Bot, user_id: int, username: str | None, file_
     count = await db.append_task_photo(user_id, file_id)
     if count < config.STEP2_REQUIRED_SCREENSHOTS:
         if notify_progress:
-            await bot.send_message(user_id, f"📸 Принято {count}/{config.STEP2_REQUIRED_SCREENSHOTS}")
+            await bot.send_message(user_id, replies.step2_progress(count, config.STEP2_REQUIRED_SCREENSHOTS))
         return
 
     scheduler.cancel_job(f"task:{user_id}")
@@ -144,11 +122,7 @@ async def append_step2_photo(bot: Bot, user_id: int, username: str | None, file_
     item_id = await db.create_moderation_item(user_id, 2, user["task_text"], photos)
 
     media = [InputMediaPhoto(media=p) for p in photos]
-    caption = (
-        f"🆕 Проверка — шаг 2 ({len(photos)} скриншотов)\n"
-        f"Пользователь: {user_mention(user_id, username)}\n"
-        f"Требуемый текст:\n«{user['task_text']}»"
-    )
+    caption = replies.moderation_caption_step2(user_mention(user_id, username), user["task_text"], len(photos))
     try:
         sent = await bot.send_media_group(config.MODERATION_GROUP_ID, media)
         control = await bot.send_message(
@@ -163,7 +137,7 @@ async def append_step2_photo(bot: Bot, user_id: int, username: str | None, file_
     group_ids = [m.message_id for m in sent] + [control.message_id]
     await db.set_moderation_messages(item_id, group_ids, control.message_id)
     scheduler.schedule_once(f"mod:{item_id}", config.MODERATION_TIMEOUT, handle_moderation_timeout, bot, item_id)
-    await bot.send_message(user_id, "⏳ Скриншоты отправлены на проверку модераторам, подожди немного.")
+    await bot.send_message(user_id, replies.SCREENSHOTS_SENT_STEP2)
 
 
 # ---------------- РЕШЕНИЕ МОДЕРАЦИИ ----------------
@@ -194,29 +168,19 @@ async def process_moderation_decision(bot: Bot, item_id: int, approved: bool, mo
     if approved:
         await db.reset_attempts(user_id, step)
         if step == 1:
-            await bot.send_message(user_id, "✅ Первое задание принято! Переходим дальше.")
+            await bot.send_message(user_id, replies.STEP1_APPROVED)
             await issue_step2_task(bot, user_id)
         else:
-            await bot.send_message(user_id, "✅ Второе задание принято! Остался последний шаг.")
+            await bot.send_message(user_id, replies.STEP2_APPROVED)
             await issue_sponsors_step(bot, user_id)
     else:
         attempts = await db.bump_attempts(user_id, step)
         if attempts >= config.MAX_ATTEMPTS:
             await db.lock_user(user_id, config.LOCKOUT_HOURS)
-            await bot.send_message(
-                user_id,
-                f"❌ Задание отклонено. Превышен лимит попыток ({config.MAX_ATTEMPTS}).\n"
-                f"Доступ заблокирован на {config.LOCKOUT_HOURS} часов.",
-            )
+            await bot.send_message(user_id, replies.rejected_locked(config.MAX_ATTEMPTS, config.LOCKOUT_HOURS))
         else:
             left = config.MAX_ATTEMPTS - attempts
-            await bot.send_message(
-                user_id,
-                f"❌ Задание отклонено. Осталось попыток: {left}.\n\n"
-                "Убедись, что на скриншоте виден именно тот текст комментария, который был выдан "
-                "(слово в слово), и что это свежий скрин под нужным видео — не старое фото. "
-                "Вот новое задание:",
-            )
+            await bot.send_message(user_id, replies.rejected_retry(left))
             if step == 1:
                 await issue_step1_task(bot, user_id)
             else:
@@ -232,7 +196,7 @@ async def handle_task_timeout(bot: Bot, user_id: int, step: int):
     expected = config.STATUS_STEP1_TASK if step == 1 else config.STATUS_STEP2_TASK
     if user["status"] != expected:
         return  # уже сдал или продвинулся дальше
-    await bot.send_message(user_id, "⏰ Время вышло! Задание аннулировано, вот новое:")
+    await bot.send_message(user_id, replies.TASK_TIMEOUT)
     if step == 1:
         await issue_step1_task(bot, user_id)
     else:
@@ -261,7 +225,7 @@ async def check_subscriptions(bot: Bot, user_id: int) -> list[str]:
 
 async def finish_sponsors_step(bot: Bot, user_id: int, chat_id: int):
     await db.set_status(user_id, config.STATUS_DONE)
-    await bot.send_message(chat_id, "🎉 Все проверки пройдены! Крутим рулетку удачи…")
+    await bot.send_message(chat_id, replies.ALL_CHECKS_PASSED)
     await run_roulette(bot, user_id, chat_id)
 
 
@@ -272,7 +236,7 @@ async def run_roulette(bot: Bot, user_id: int, chat_id: int):
     await db.set_nft_number(user_id, value)
     nft = await db.get_nft(value)
     if nft:
-        text = f"🎁 Тебе выпал подарок:\n\n<b>{nft['name']}</b>\n{nft['description']}"
+        text = replies.gift_result(nft["name"], nft["description"])
         if nft["image_url"]:
             try:
                 await bot.send_photo(chat_id, nft["image_url"], caption=text, parse_mode="HTML")
@@ -281,12 +245,10 @@ async def run_roulette(bot: Bot, user_id: int, chat_id: int):
         else:
             await bot.send_message(chat_id, text, parse_mode="HTML")
     else:
-        await bot.send_message(chat_id, f"🎁 Тебе выпало число {value}!")
+        await bot.send_message(chat_id, replies.gift_result_fallback(value))
 
     await bot.send_message(
         chat_id,
-        "Чтобы получить подарок, напиши менеджеру "
-        f"@{config.MANAGER_USERNAME}, укажи выпавший номер и переведи "
-        f"<b>{config.GIFT_PRICE_STARS} Stars</b> ⭐",
+        replies.manager_instructions(config.MANAGER_USERNAME, config.GIFT_PRICE_STARS),
         parse_mode="HTML",
     )

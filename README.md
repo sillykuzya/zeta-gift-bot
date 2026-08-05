@@ -9,6 +9,7 @@ config.py              настройки (токен, БД, ID группы м�
 db.py                   вся работа с PostgreSQL
 states.py               FSM-состояния админ-панели
 keyboards.py            инлайн-клавиатуры
+replies.py              все текстовые реплики бота (пользователям и модераторам)
 logic.py                бизнес-логика воронки и модерации
 scheduler.py            таймеры (APScheduler)
 handlers/user.py        /start, приём скриншотов, проверка подписок
@@ -66,7 +67,6 @@ MANAGER_USERNAME=your_manager
 ```bash
 python main.py
 ```
-
 
 ## .gitignore
 

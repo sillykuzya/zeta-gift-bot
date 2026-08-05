@@ -8,6 +8,7 @@ import config
 import db
 import logic
 import keyboards
+import replies
 
 router = Router(name="user")
 
@@ -28,47 +29,32 @@ async def cmd_start(message: Message):
     username = message.from_user.username
 
     if await db.is_banned(user_id):
-        await message.answer("🚫 Ты заблокирован и не можешь участвовать в розыгрыше.")
+        await message.answer(replies.BANNED)
         return
 
     await db.create_user_if_not_exists(user_id, username)
 
     if await db.is_locked(user_id):
-        await message.answer(
-            "⏳ Доступ временно заблокирован из-за превышения лимита попыток. Попробуй позже."
-        )
+        await message.answer(replies.LOCKED_ON_START)
         return
 
     user = await db.get_user(user_id)
     status = user["status"]
 
     if status == config.STATUS_NEW:
-        await message.answer(
-            "👋 Добро пожаловать в розыгрыш NFT-подарков!\n\n"
-            "Чтобы получить шанс выиграть подарок, пройди 3 простых шага. "
-            "Начинаем с первого 👇"
-        )
+        await message.answer(replies.WELCOME)
         await logic.issue_step1_task(message.bot, user_id)
     elif status in (config.STATUS_STEP1_TASK, config.STATUS_STEP2_TASK):
-        await message.answer(
-            f"У тебя уже есть активное задание:\n\n«{user['task_text']}»\n\n"
-            "Пришли скриншот, когда выполнишь его 📸"
-        )
+        await message.answer(replies.active_task_reminder(user["task_text"]))
     elif status in (config.STATUS_STEP1_REVIEW, config.STATUS_STEP2_REVIEW):
-        await message.answer("⏳ Твой предыдущий скриншот ещё проверяется модераторами, подожди.")
+        await message.answer(replies.REVIEW_WAIT)
     elif status == config.STATUS_STEP3_SPONSORS:
         sponsors = await db.list_sponsors(active_only=True)
-        await message.answer(
-            "📢 Подпишись на каналы ниже и нажми «Проверить подписки»:",
-            reply_markup=keyboards.sponsors_kb(sponsors),
-        )
+        await message.answer(replies.SPONSORS_REMINDER, reply_markup=keyboards.sponsors_kb(sponsors))
     elif status == config.STATUS_DONE:
-        await message.answer(
-            f"🎉 Ты уже прошёл розыгрыш! Для получения подарка обратись к "
-            f"@{config.MANAGER_USERNAME}."
-        )
+        await message.answer(replies.already_done(config.MANAGER_USERNAME))
     elif status == config.STATUS_LOCKED:
-        await message.answer("⏳ Доступ временно заблокирован. Попробуй позже.")
+        await message.answer(replies.LOCKED_STATUS)
 
 
 @router.message(F.chat.type == "private", F.content_type == "photo")
@@ -88,7 +74,7 @@ async def handle_photo(message: Message):
                 # предупреждаем один раз на альбом, а не на каждое фото в нём
                 if _last_step1_album_warned.get(user_id) != message.media_group_id:
                     _last_step1_album_warned[user_id] = message.media_group_id
-                    await message.answer("Нужен только один скриншот — пришли, пожалуйста, одно фото 🙏")
+                    await message.answer(replies.STEP1_ALBUM_REJECTED)
                 return
             await logic.submit_step1_photo(message.bot, user_id, username, file_id)
         elif user["status"] == config.STATUS_STEP2_TASK:
@@ -99,9 +85,9 @@ async def handle_photo(message: Message):
             else:
                 await logic.append_step2_photo(message.bot, user_id, username, file_id)
         elif user["status"] in (config.STATUS_STEP1_REVIEW, config.STATUS_STEP2_REVIEW):
-            await message.answer("⏳ Скриншот уже отправлен на проверку — жди результата, новые не нужны.")
+            await message.answer(replies.ALREADY_IN_REVIEW)
         else:
-            await message.answer("Сейчас скриншот не требуется 🙂")
+            await message.answer(replies.PHOTO_NOT_NEEDED)
 
 
 @router.callback_query(F.data == "check_subs")
@@ -109,12 +95,11 @@ async def cb_check_subs(callback: CallbackQuery):
     user_id = callback.from_user.id
     not_subscribed = await logic.check_subscriptions(callback.bot, user_id)
     if not_subscribed:
-        names = "\n".join(f"• {n}" for n in not_subscribed)
-        await callback.answer("Подпишись на все каналы!", show_alert=True)
-        await callback.message.answer(f"❗ Ты ещё не подписан на:\n{names}")
+        await callback.answer(replies.SUBSCRIBE_ALERT, show_alert=True)
+        await callback.message.answer(replies.not_subscribed_list(not_subscribed))
         return
 
-    await callback.answer("Все подписки на месте! 🎉")
+    await callback.answer(replies.ALL_SUBSCRIBED_ALERT)
     try:
         await callback.message.delete()
     except Exception:

@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery
 
 import db
 import logic
+import replies
 
 router = Router(name="moderation")
 
@@ -11,7 +12,7 @@ router = Router(name="moderation")
 async def cb_moderation_decision(callback: CallbackQuery):
     moderator_id = callback.from_user.id
     if not await db.is_moderator(moderator_id):
-        await callback.answer("Ты не модератор.", show_alert=True)
+        await callback.answer(replies.NOT_A_MODERATOR, show_alert=True)
         return
 
     _, action, item_id_str = callback.data.split(":")
@@ -20,8 +21,8 @@ async def cb_moderation_decision(callback: CallbackQuery):
 
     item = await db.get_moderation_item(item_id)
     if item is None or item["status"] != "pending":
-        await callback.answer("Уже обработано другим модератором.", show_alert=True)
+        await callback.answer(replies.ALREADY_HANDLED, show_alert=True)
         return
 
-    await callback.answer("Принято ✅" if approved else "Отклонено ❌")
+    await callback.answer(replies.MOD_APPROVED_ALERT if approved else replies.MOD_REJECTED_ALERT)
     await logic.process_moderation_decision(callback.bot, item_id, approved, moderator_id)
