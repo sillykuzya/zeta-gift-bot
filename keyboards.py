@@ -20,6 +20,12 @@ def manager_kb(link: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def given_kb(user_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Выдано", callback_data=f"given:{user_id}")
+    return kb.as_markup()
+
+
 def moderation_kb(item_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Одобрить", callback_data=f"mod:approve:{item_id}")

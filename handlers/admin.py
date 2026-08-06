@@ -201,16 +201,15 @@ async def cb_mods_list(callback: CallbackQuery):
 @router.callback_query(F.data == "adm:mods:add")
 async def cb_mods_add(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ModeratorStates.waiting_id)
-    await callback.message.edit_text("Пришли Telegram ID пользователя, которого сделать модератором:")
+    await callback.message.edit_text("Пришли Telegram ID или @username пользователя, которого сделать модератором:")
     await callback.answer()
 
 
 @router.message(ModeratorStates.waiting_id)
 async def mods_id_input(message: Message, state: FSMContext):
-    try:
-        uid = int(message.text.strip())
-    except ValueError:
-        await message.answer("Нужно число (ID пользователя). Попробуй ещё раз:")
+    uid = await db.resolve_user_id(message.text)
+    if uid is None:
+        await message.answer("Не нашёл такого пользователя. Пришли числовой ID или @username (у username сработает, только если человек уже писал боту):")
         return
     await db.add_moderator(uid)
     await state.clear()
@@ -313,16 +312,15 @@ async def cb_bans_list(callback: CallbackQuery):
 @router.callback_query(F.data == "adm:bans:add")
 async def cb_bans_add(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BanStates.waiting_id)
-    await callback.message.edit_text("Пришли Telegram ID пользователя для блокировки:")
+    await callback.message.edit_text("Пришли Telegram ID или @username пользователя для блокировки:")
     await callback.answer()
 
 
 @router.message(BanStates.waiting_id)
 async def ban_id_input(message: Message, state: FSMContext):
-    try:
-        uid = int(message.text.strip())
-    except ValueError:
-        await message.answer("Нужно число (ID пользователя). Попробуй ещё раз:")
+    uid = await db.resolve_user_id(message.text)
+    if uid is None:
+        await message.answer("Не нашёл такого пользователя. Пришли числовой ID или @username (у username сработает, только если человек уже писал боту):")
         return
     await state.update_data(uid=uid)
     await state.set_state(BanStates.waiting_reason)

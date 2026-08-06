@@ -34,3 +34,7 @@ class UnbanStates(StatesGroup):
 
 class TaskTextStates(StatesGroup):
     waiting_text = State()
+
+
+class ManagerStates(StatesGroup):
+    waiting_identifier = State()

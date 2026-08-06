@@ -32,6 +32,29 @@ GIFT_ALREADY_GIVEN = "🎉 Ты уже получил свой подарок. �
 GIFT_GIVEN_CONFIRMED = "🎉 Поздравляем! Подарок отмечен как выданный. Спасибо за участие в розыгрыше!"
 
 
+# ---------------- уведомление менеджера ----------------
+
+def manager_notify(mention: str, nft_number: int) -> str:
+    return f"🔔 Пользователь {mention} дошёл до конца и ждёт подарок №{nft_number}."
+
+
+def given_marked(mention: str) -> str:
+    return f"✅ Отмечено: {mention} получил подарок."
+
+
+def given_by_someone_else(mention: str) -> str:
+    return f"✅ {mention} — подарок уже отмечен выданным."
+
+
+WAITING_LIST_EMPTY = "Сейчас никто не ждёт подарок."
+GIVEN_USAGE = "Пришли ID или @username пользователя, которому выдал подарок:"
+GIVEN_NOT_FOUND = "Не нашёл такого пользователя. Проверь ID или @username."
+
+
+def given_wrong_status(mention: str, status: str) -> str:
+    return f"У {mention} статус «{status}», а не «ждёт менеджера» — возможно, уже отмечено или это не тот человек."
+
+
 # ---------------- приём скриншотов ----------------
 
 STEP1_ALBUM_REJECTED = "Нужен только один скриншот — пришли, пожалуйста, одно фото 🙏"

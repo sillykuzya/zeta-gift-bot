@@ -258,6 +258,7 @@ async def finish_sponsors_step(bot: Bot, user_id: int, chat_id: int):
     await db.set_status(user_id, config.STATUS_AWAITING_MANAGER)
     await bot.send_message(chat_id, replies.ALL_CHECKS_PASSED)
     await send_manager_instructions(bot, user_id, chat_id)
+    await notify_managers(bot, user_id)
 
 
 async def send_manager_instructions(bot: Bot, user_id: int, chat_id: int):
@@ -269,3 +270,37 @@ async def send_manager_instructions(bot: Bot, user_id: int, chat_id: int):
         parse_mode="HTML",
         reply_markup=keyboards.manager_kb(link),
     )
+
+
+async def notify_managers(bot: Bot, user_id: int):
+    """Шлёт всем менеджерам/админам карточку с кнопкой «Выдано» — не нужно искать ID вручную."""
+    user = await db.get_user(user_id)
+    mention = user_mention(user_id, user["username"])
+    text = replies.manager_notify(mention, user["nft_number"])
+    recipients = config.MANAGER_IDS or config.ADMIN_IDS
+    for recipient_id in recipients:
+        try:
+            await bot.send_message(recipient_id, text, parse_mode="HTML", reply_markup=keyboards.given_kb(user_id))
+        except Exception:
+            log.exception("Не удалось уведомить менеджера %s о пользователе %s", recipient_id, user_id)
+
+
+async def mark_gift_given(bot: Bot, user_id: int) -> tuple[bool, str]:
+    """Общая точка отметки выдачи — используется и кнопкой «Выдано», и командой /given.
+    Возвращает (успех, текст для того, кто отмечал)."""
+    user = await db.get_user(user_id)
+    if user is None:
+        return False, replies.GIVEN_NOT_FOUND
+
+    mention = user_mention(user_id, user["username"])
+    if user["status"] != config.STATUS_AWAITING_MANAGER:
+        if user["status"] == config.STATUS_GIFT_GIVEN:
+            return False, replies.given_by_someone_else(mention)
+        return False, replies.given_wrong_status(mention, user["status"])
+
+    await db.set_status(user_id, config.STATUS_GIFT_GIVEN)
+    try:
+        await bot.send_message(user_id, replies.GIFT_GIVEN_CONFIRMED)
+    except Exception:
+        pass
+    return True, replies.given_marked(mention)

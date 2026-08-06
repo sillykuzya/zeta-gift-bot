@@ -103,6 +103,30 @@ async def get_user(user_id: int):
         return await conn.fetchrow("SELECT * FROM users WHERE user_id=$1", user_id)
 
 
+async def get_user_by_username(username: str):
+    username = username.lstrip("@")
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT * FROM users WHERE username ILIKE $1", username
+        )
+
+
+async def resolve_user_id(identifier: str) -> int | None:
+    """Принимает числовой ID или @username (или username без @) — возвращает user_id или None."""
+    identifier = identifier.strip()
+    if identifier.lstrip("-").isdigit():
+        return int(identifier)
+    row = await get_user_by_username(identifier)
+    return row["user_id"] if row else None
+
+
+async def users_with_status(status: str):
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            "SELECT user_id, username, nft_number FROM users WHERE status=$1 ORDER BY created_at", status
+        )
+
+
 async def create_user_if_not_exists(user_id: int, username: str | None):
     async with pool.acquire() as conn:
         await conn.execute(
