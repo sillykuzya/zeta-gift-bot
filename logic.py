@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from urllib.parse import quote
 
 from aiogram import Bot
 from aiogram.types import InputMediaPhoto
@@ -17,6 +18,35 @@ log = logging.getLogger(__name__)
 
 def user_mention(user_id: int, username: str | None) -> str:
     return f"@{username}" if username else f"<a href='tg://user?id={user_id}'>{user_id}</a>"
+
+
+def manager_deeplink(username: str, nft_number: int) -> str:
+    text = f"Я выиграл подарок номер {nft_number}"
+    return f"https://t.me/{username}?text={quote(text)}"
+
+
+# ---------------- ПОДАРОК (бросок кубика сразу после «Начать») ----------------
+
+async def assign_gift(bot: Bot, user_id: int, chat_id: int):
+    dice_msg = await bot.send_dice(chat_id, emoji="🎲")
+    await asyncio.sleep(4)
+    value = dice_msg.dice.value
+    await db.set_nft_number(user_id, value)
+    await db.set_status(user_id, config.STATUS_GIFT_ASSIGNED)
+    nft = await db.get_nft(value)
+    kb = keyboards.continue_kb()
+
+    if nft:
+        text = replies.gift_assigned(nft["name"], nft["description"])
+        if nft["image_url"]:
+            try:
+                await bot.send_photo(chat_id, nft["image_url"], caption=text, parse_mode="HTML", reply_markup=kb)
+                return
+            except TelegramBadRequest:
+                pass
+        await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await bot.send_message(chat_id, replies.gift_assigned_fallback(value), reply_markup=kb)
 
 
 # ---------------- ВЫДАЧА ЗАДАНИЙ ----------------
@@ -207,7 +237,7 @@ async def handle_moderation_timeout(bot: Bot, item_id: int):
     await process_moderation_decision(bot, item_id, approved=True, moderator_id=None)
 
 
-# ---------------- СПОНСОРЫ / РУЛЕТКА ----------------
+# ---------------- СПОНСОРЫ ----------------
 
 async def check_subscriptions(bot: Bot, user_id: int) -> list[str]:
     """Возвращает список названий каналов, на которые пользователь НЕ подписан."""
@@ -224,31 +254,18 @@ async def check_subscriptions(bot: Bot, user_id: int) -> list[str]:
 
 
 async def finish_sponsors_step(bot: Bot, user_id: int, chat_id: int):
-    await db.set_status(user_id, config.STATUS_DONE)
+    """Все проверки пройдены — кубик уже был брошен в начале, здесь только связь с менеджером."""
+    await db.set_status(user_id, config.STATUS_AWAITING_MANAGER)
     await bot.send_message(chat_id, replies.ALL_CHECKS_PASSED)
-    await run_roulette(bot, user_id, chat_id)
+    await send_manager_instructions(bot, user_id, chat_id)
 
 
-async def run_roulette(bot: Bot, user_id: int, chat_id: int):
-    dice_msg = await bot.send_dice(chat_id, emoji="🎲")
-    await asyncio.sleep(4)
-    value = dice_msg.dice.value
-    await db.set_nft_number(user_id, value)
-    nft = await db.get_nft(value)
-    if nft:
-        text = replies.gift_result(nft["name"], nft["description"])
-        if nft["image_url"]:
-            try:
-                await bot.send_photo(chat_id, nft["image_url"], caption=text, parse_mode="HTML")
-            except TelegramBadRequest:
-                await bot.send_message(chat_id, text, parse_mode="HTML")
-        else:
-            await bot.send_message(chat_id, text, parse_mode="HTML")
-    else:
-        await bot.send_message(chat_id, replies.gift_result_fallback(value))
-
+async def send_manager_instructions(bot: Bot, user_id: int, chat_id: int):
+    user = await db.get_user(user_id)
+    link = manager_deeplink(config.MANAGER_USERNAME, user["nft_number"])
     await bot.send_message(
         chat_id,
-        replies.manager_instructions(config.MANAGER_USERNAME, config.GIFT_PRICE_STARS),
+        replies.manager_instructions(config.GIFT_PRICE_STARS),
         parse_mode="HTML",
+        reply_markup=keyboards.manager_kb(link),
     )

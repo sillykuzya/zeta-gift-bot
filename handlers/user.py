@@ -23,6 +23,13 @@ def _lock_for(user_id: int) -> asyncio.Lock:
     return _user_locks.setdefault(user_id, asyncio.Lock())
 
 
+async def _try_delete(message: Message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
 @router.message(CommandStart(), F.chat.type == "private")
 async def cmd_start(message: Message):
     user_id = message.from_user.id
@@ -42,8 +49,9 @@ async def cmd_start(message: Message):
     status = user["status"]
 
     if status == config.STATUS_NEW:
-        await message.answer(replies.WELCOME)
-        await logic.issue_step1_task(message.bot, user_id)
+        await message.answer(replies.WELCOME, reply_markup=keyboards.start_kb())
+    elif status == config.STATUS_GIFT_ASSIGNED:
+        await message.answer(replies.GIFT_ASSIGNED_REMINDER, reply_markup=keyboards.continue_kb())
     elif status in (config.STATUS_STEP1_TASK, config.STATUS_STEP2_TASK):
         await message.answer(replies.active_task_reminder(user["task_text"]))
     elif status in (config.STATUS_STEP1_REVIEW, config.STATUS_STEP2_REVIEW):
@@ -51,10 +59,37 @@ async def cmd_start(message: Message):
     elif status == config.STATUS_STEP3_SPONSORS:
         sponsors = await db.list_sponsors(active_only=True)
         await message.answer(replies.SPONSORS_REMINDER, reply_markup=keyboards.sponsors_kb(sponsors))
-    elif status == config.STATUS_DONE:
-        await message.answer(replies.already_done(config.MANAGER_USERNAME))
+    elif status == config.STATUS_AWAITING_MANAGER:
+        link = logic.manager_deeplink(config.MANAGER_USERNAME, user["nft_number"])
+        await message.answer(replies.AWAITING_MANAGER_REMINDER, reply_markup=keyboards.manager_kb(link))
+    elif status == config.STATUS_GIFT_GIVEN:
+        await message.answer(replies.GIFT_ALREADY_GIVEN)
     elif status == config.STATUS_LOCKED:
         await message.answer(replies.LOCKED_STATUS)
+
+
+@router.callback_query(F.data == "start_game")
+async def cb_start_game(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    if user is None or user["status"] != config.STATUS_NEW:
+        await callback.answer()
+        return
+    await callback.answer()
+    await _try_delete(callback.message)
+    await logic.assign_gift(callback.bot, user_id, callback.message.chat.id)
+
+
+@router.callback_query(F.data == "begin_tasks")
+async def cb_begin_tasks(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    if user is None or user["status"] != config.STATUS_GIFT_ASSIGNED:
+        await callback.answer()
+        return
+    await callback.answer()
+    await _try_delete(callback.message)
+    await logic.issue_step1_task(callback.bot, user_id)
 
 
 @router.message(F.chat.type == "private", F.content_type == "photo")
@@ -100,8 +135,5 @@ async def cb_check_subs(callback: CallbackQuery):
         return
 
     await callback.answer(replies.ALL_SUBSCRIBED_ALERT)
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
+    await _try_delete(callback.message)
     await logic.finish_sponsors_step(callback.bot, user_id, callback.message.chat.id)

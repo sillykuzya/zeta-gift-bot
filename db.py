@@ -371,7 +371,8 @@ async def get_stats():
                       status
                FROM users
                ORDER BY (CASE status
-                   WHEN 'done' THEN 5
+                   WHEN 'gift_given' THEN 6
+                   WHEN 'awaiting_manager' THEN 5
                    WHEN 'step3_sponsors' THEN 4
                    WHEN 'step2_pending_review' THEN 3
                    WHEN 'step2_pending_task' THEN 2

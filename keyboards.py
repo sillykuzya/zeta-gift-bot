@@ -2,6 +2,24 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
+def start_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚀 Начать", callback_data="start_game")
+    return kb.as_markup()
+
+
+def continue_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔥 Поехали", callback_data="begin_tasks")
+    return kb.as_markup()
+
+
+def manager_kb(link: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✉️ Написать менеджеру", url=link)
+    return kb.as_markup()
+
+
 def moderation_kb(item_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Одобрить", callback_data=f"mod:approve:{item_id}")
@@ -119,9 +137,10 @@ def broadcast_filter_kb() -> InlineKeyboardMarkup:
     kb.button(text="Всем", callback_data="adm:broadcast:filter:all")
     kb.button(text="На step1", callback_data="adm:broadcast:filter:step1_pending_task")
     kb.button(text="На step2", callback_data="adm:broadcast:filter:step2_pending_task")
-    kb.button(text="Дошедшие до конца", callback_data="adm:broadcast:filter:done")
+    kb.button(text="Ждут менеджера", callback_data="adm:broadcast:filter:awaiting_manager")
+    kb.button(text="Получили подарок", callback_data="adm:broadcast:filter:gift_given")
     kb.button(text="⬅️ Отмена", callback_data="adm:main")
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 

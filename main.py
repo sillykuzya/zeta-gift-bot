@@ -12,6 +12,7 @@ from scheduler import scheduler
 from handlers import user as user_handlers
 from handlers import moderation as moderation_handlers
 from handlers import admin as admin_handlers
+from handlers import manager as manager_handlers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -29,8 +30,10 @@ async def main():
     log.info("База данных готова")
 
     # Порядок важен: admin — самый специфичный (фильтр по ADMIN_IDS),
+    # manager — команда /given (ADMIN_IDS или MANAGER_IDS),
     # moderation — обрабатывает mod:*, user — всё остальное (/start, фото, check_subs)
     dp.include_router(admin_handlers.router)
+    dp.include_router(manager_handlers.router)
     dp.include_router(moderation_handlers.router)
     dp.include_router(user_handlers.router)
 
